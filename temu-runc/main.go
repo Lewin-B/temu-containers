@@ -2,24 +2,43 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
 	"github.com/urfave/cli/v3"
+
+	// MUST match your go.mod module path
+	"github/Lewin-B/temu-runc/utils"
 )
 
 func main() {
+	app := &cli.Command{
+		Name:  "temu-runc",
+		Usage: "Minimal container runtime",
+		Commands: []*cli.Command{
+			{
+				Name:      "create",
+				Usage:     "create <container-id>",
+				ArgsUsage: "<container-id>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					containerID := cmd.Args().Get(0)
+					if containerID == "" {
+						return fmt.Errorf("missing container id\nusage: temu-runc create <container-id>")
+					}
 
-	cmd := &cli.Command{
-		Name:  "container",
-		Usage: "Container management menu",
-		Action: func(context.Context, *cli.Command) error {
-			log.Println("hello from urfave")
-			return nil
+					if _, err := utils.NewContainer(containerID); err != nil {
+						return err
+					}
+
+					fmt.Printf("Container created: %s\n", containerID)
+					return nil
+				},
+			},
 		},
 	}
 
-	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		log.Fatal("Whoops")
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		log.Fatal(err)
 	}
 }
