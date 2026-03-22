@@ -51,7 +51,7 @@ func main() {
 						return err
 					}
 
-					fmt.Printf("Executor process ran succesfully")
+					fmt.Println("Executor process ran succesfully")
 					return nil
 				},
 			},

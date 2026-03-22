@@ -93,7 +93,6 @@ IFS= read -r msg < "$FIFO_PATH" || true
 echo "[container] received: $msg" 1>&2
 exec /bin/sh
 `
-	fmt.Println(os.Geteuid())
 
 	// New file system virtualization
 	if err := syscall.Chroot(ROOT_FS); err != nil {
