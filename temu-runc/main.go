@@ -35,6 +35,26 @@ func main() {
 					return nil
 				},
 			},
+			// chroot and mount command
+			{
+				Name:      "execute",
+				Usage:     "execute <container-id>",
+				ArgsUsage: "<container-id>",
+				Hidden:    true,
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					containerID := cmd.Args().Get(0)
+					if containerID == "" {
+						return fmt.Errorf("missing container id\nusage: temu-runc create <container-id>")
+					}
+
+					if err := utils.Executor(containerID); err != nil {
+						return err
+					}
+
+					fmt.Printf("Executor process ran succesfully")
+					return nil
+				},
+			},
 		},
 	}
 

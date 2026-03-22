@@ -39,29 +39,10 @@ func NewContainer(containerID string) (*Container, error) {
 		return nil, fmt.Errorf("mkfifo: %w", err)
 	}
 
-	script := `
-echo "[container] waiting for FIFO at: $FIFO_PATH" 1>&2
-
-# Basic mounts
-mount -t proc proc /proc
-
-# /dev as tmpfs so shells/tools don't freak out
-mount -t tmpfs tmpfs /dev
-
-hostname "temu-` + containerID + `" 2>/dev/null || true
-
-IFS= read -r msg < "$FIFO_PATH" || true
-
-echo "[container] received: $msg" 1>&2
-exec /bin/sh
-`
-
-	cmd := exec.Command("sh", "-c", script)
+	cmd := exec.Command(os.Args[0], "execute", containerID)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Chroot: ROOT_FS,
-		// Dir will be set by cmd.Dir, but you can also chdir in the script.
 		Cloneflags: syscall.CLONE_NEWUTS |
 			syscall.CLONE_NEWPID |
 			syscall.CLONE_NEWNS |
@@ -78,7 +59,7 @@ exec /bin/sh
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start container init: %w", err)
+		return nil, fmt.Errorf("start executor container init: %w", err)
 	}
 
 	containerCfg := ContainerConfig{
@@ -99,4 +80,44 @@ exec /bin/sh
 	return &Container{
 		ContainerId: containerID,
 	}, nil
+}
+
+func Executor(containerID string) error {
+	script := `
+echo "[container] waiting for FIFO at: $FIFO_PATH" 1>&2
+
+hostname "temu-` + containerID + `" 2>/dev/null || true
+
+IFS= read -r msg < "$FIFO_PATH" || true
+
+echo "[container] received: $msg" 1>&2
+exec /bin/sh
+`
+	fmt.Println(os.Geteuid())
+
+	// New file system virtualization
+	if err := syscall.Chroot(ROOT_FS); err != nil {
+		return fmt.Errorf("chroot error %w", err)
+	}
+	if err := os.Chdir("/"); err != nil {
+		return fmt.Errorf("Chdir error: %w", err)
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", script)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+
+	// New mounts
+	if err := syscall.Mount("tmpfs", "dev", "tmpfs", 0, ""); err != nil {
+		return fmt.Errorf("tmpfs mount error: %w", err)
+	}
+	if err := syscall.Mount("proc", "proc", "proc", 0, ""); err != nil {
+		return fmt.Errorf("proc mount error: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start container init: %w", err)
+	}
+
+	return nil
+
 }
