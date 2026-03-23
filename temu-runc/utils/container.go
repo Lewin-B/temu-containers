@@ -2,14 +2,17 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 const ROOT_FS = "/home/ubuntu/mycontainer/rootfs"
+const linuxOPath = 0x200000
 
 type Container struct {
 	ContainerId string
@@ -20,6 +23,14 @@ type ContainerConfig struct {
 	PID         int    `json:"init_pid"` // host PID
 }
 
+func runtimeDirForHost(containerID string) string {
+	if runtimeDir := os.Getenv("TEMU_RUNTIME_DIR"); runtimeDir != "" {
+		return runtimeDir
+	}
+
+	return fmt.Sprintf("/run/user/%d/temu-runc/%s", os.Getuid(), containerID)
+}
+
 func (c Container) startContainer() int {
 	return 0
 }
@@ -28,7 +39,7 @@ func NewContainer(containerID string) (*Container, error) {
 	uid := os.Getuid()
 	gid := os.Getgid()
 
-	runtimeDir := fmt.Sprintf("/run/user/%d/temu-runc/%s", uid, containerID)
+	runtimeDir := runtimeDirForHost(containerID)
 	if err := os.MkdirAll(runtimeDir, 0700); err != nil {
 		return nil, fmt.Errorf("mkdir runtime dir: %w", err)
 	}
@@ -41,6 +52,7 @@ func NewContainer(containerID string) (*Container, error) {
 
 	cmd := exec.Command(os.Args[0], "execute", containerID)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Env = append(os.Environ(), "TEMU_RUNTIME_DIR="+runtimeDir)
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUTS |
@@ -83,16 +95,15 @@ func NewContainer(containerID string) (*Container, error) {
 }
 
 func Executor(containerID string) error {
-	script := `
-echo "[container] waiting for FIFO at: $FIFO_PATH" 1>&2
+	runtimeDir := runtimeDirForHost(containerID)
+	fifoPath := filepath.Join(runtimeDir, "exec.fifo")
 
-hostname "temu-` + containerID + `" 2>/dev/null || true
-
-IFS= read -r msg < "$FIFO_PATH" || true
-
-echo "[container] received: $msg" 1>&2
-exec /bin/sh
-`
+	fifoFD, err := syscall.Open(fifoPath, linuxOPath|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open exec fifo: %w", err)
+	}
+	fifoFile := os.NewFile(uintptr(fifoFD), fifoPath)
+	defer fifoFile.Close()
 
 	// New file system virtualization
 	if err := syscall.Chroot(ROOT_FS); err != nil {
@@ -102,9 +113,6 @@ exec /bin/sh
 		return fmt.Errorf("Chdir error: %w", err)
 	}
 
-	cmd := exec.Command("/bin/sh", "-c", script)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-
 	// New mounts
 	if err := syscall.Mount("tmpfs", "dev", "tmpfs", 0, ""); err != nil {
 		return fmt.Errorf("tmpfs mount error: %w", err)
@@ -113,10 +121,56 @@ exec /bin/sh
 		return fmt.Errorf("proc mount error: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start container init: %w", err)
+	if err := syscall.Sethostname([]byte("temu-" + containerID)); err != nil {
+		return fmt.Errorf("sethostname: %w", err)
+	}
+
+	procFIFOPath := fmt.Sprintf("/proc/self/fd/%d", fifoFD)
+	readFD, err := syscall.Open(procFIFOPath, syscall.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open exec fifo through procfd: %w", err)
+	}
+	readFile := os.NewFile(uintptr(readFD), procFIFOPath)
+	defer readFile.Close()
+
+	buf := make([]byte, 128)
+	if _, err := readFile.Read(buf); err != nil {
+		return fmt.Errorf("read start signal: %w", err)
+	}
+
+	if err := fifoFile.Close(); err != nil {
+		return fmt.Errorf("close exec fifo pathfd: %w", err)
+	}
+
+	return syscall.Exec("/bin/sh", []string{"/bin/sh"}, os.Environ())
+
+}
+
+func Start(containerID string) error {
+	runtimeDir := runtimeDirForHost(containerID)
+	fifoPath := filepath.Join(runtimeDir, "exec.fifo")
+
+	var fifo *os.File
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		fd, err := syscall.Open(fifoPath, syscall.O_WRONLY|syscall.O_NONBLOCK, 0600)
+		if err == nil {
+			fifo = os.NewFile(uintptr(fd), fifoPath)
+			break
+		}
+		if !errors.Is(err, syscall.ENXIO) {
+			return fmt.Errorf("open exec fifo: %w", err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("open exec fifo: timed out waiting for container init to open read side")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	defer fifo.Close()
+
+	if _, err := fifo.WriteString("continue\n"); err != nil {
+		return fmt.Errorf("write exec fifo: %w", err)
 	}
 
 	return nil
-
 }

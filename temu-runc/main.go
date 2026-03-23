@@ -55,6 +55,44 @@ func main() {
 					return nil
 				},
 			},
+			{
+				Name:  "start",
+				Usage: "start <container-id>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					containerID := cmd.Args().Get(0)
+
+					if containerID == "" {
+						return fmt.Errorf("missing container id\nusage: temu-runc create <container-id>")
+					}
+
+					if err := utils.Start(containerID); err != nil {
+						return err
+					}
+
+					return nil
+				},
+			},
+			{
+				Name:      "run",
+				Usage:     "run <container-id>",
+				ArgsUsage: "<container-id>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					containerID := cmd.Args().Get(0)
+					if containerID == "" {
+						return fmt.Errorf("missing container id\nusage: temu-runc run <container-id>")
+					}
+
+					if _, err := utils.NewContainer(containerID); err != nil {
+						return err
+					}
+					if err := utils.Start(containerID); err != nil {
+						return err
+					}
+
+					fmt.Printf("Container running: %s\n", containerID)
+					return nil
+				},
+			},
 		},
 	}
 
