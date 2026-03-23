@@ -16,6 +16,7 @@ const linuxOPath = 0x200000
 
 type Container struct {
 	ContainerId string
+	initCmd     *exec.Cmd
 }
 
 type ContainerConfig struct {
@@ -91,7 +92,16 @@ func NewContainer(containerID string) (*Container, error) {
 
 	return &Container{
 		ContainerId: containerID,
+		initCmd:     cmd,
 	}, nil
+}
+
+func (c *Container) Wait() error {
+	if c == nil || c.initCmd == nil {
+		return nil
+	}
+
+	return c.initCmd.Wait()
 }
 
 func Executor(containerID string) error {

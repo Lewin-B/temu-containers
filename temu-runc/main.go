@@ -26,13 +26,13 @@ func main() {
 					if containerID == "" {
 						return fmt.Errorf("missing container id\nusage: temu-runc create <container-id>")
 					}
-
-					if _, err := utils.NewContainer(containerID); err != nil {
+					container, err := utils.NewContainer(containerID)
+					if err != nil {
 						return err
 					}
 
 					fmt.Printf("Container created: %s\n", containerID)
-					return nil
+					return container.Wait()
 				},
 			},
 			// chroot and mount command
@@ -82,7 +82,8 @@ func main() {
 						return fmt.Errorf("missing container id\nusage: temu-runc run <container-id>")
 					}
 
-					if _, err := utils.NewContainer(containerID); err != nil {
+					container, err := utils.NewContainer(containerID)
+					if err != nil {
 						return err
 					}
 					if err := utils.Start(containerID); err != nil {
@@ -90,7 +91,7 @@ func main() {
 					}
 
 					fmt.Printf("Container running: %s\n", containerID)
-					return nil
+					return container.Wait()
 				},
 			},
 		},
