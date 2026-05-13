@@ -17,6 +17,7 @@ const linuxOPath = 0x200000
 type Container struct {
 	ContainerId string
 	initCmd     *exec.Cmd
+	cgroupName  string
 }
 
 type ContainerConfig struct {
@@ -90,9 +91,45 @@ func NewContainer(containerID string) (*Container, error) {
 		return nil, fmt.Errorf("write state.json: %w", err)
 	}
 
+	// Cgroup creation
+	cgroupId := containerID + "-cgroup"
+	cgroupName := fmt.Sprintf("container-%s.scope", containerID)
+	cgroupParentPath := fmt.Sprintf(
+		"/sys/fs/cgroup/user.slice/user-%d.slice/user@%d.service/app.slice",
+		uid,
+		uid,
+	)
+
+	cGroupConfig := CgroupConfig{
+		ID: cgroupId,
+
+		ParentPath: cgroupParentPath,
+		Name:       cgroupName,
+
+		CPU: CPUConfig{
+			Max:    "50000 100000",
+			Weight: "100",
+		},
+
+		Memory: MemoryConfig{
+			Max:  "256M",
+			High: "200M",
+			Swap: "0",
+		},
+
+		Pids: PidsConfig{
+			Max: "64",
+		},
+	}
+
+	if err := createV2(cGroupConfig); err != nil {
+		return nil, fmt.Errorf("create cgroup: %w", err)
+	}
+
 	return &Container{
 		ContainerId: containerID,
 		initCmd:     cmd,
+		cgroupName:  cgroupName,
 	}, nil
 }
 
@@ -178,8 +215,14 @@ func Start(containerID string) error {
 	}
 	defer fifo.Close()
 
+	// signal init process
 	if _, err := fifo.WriteString("continue\n"); err != nil {
 		return fmt.Errorf("write exec fifo: %w", err)
+	}
+
+	// fifo cleanup
+	if err := os.Remove(fifo.Name()); err != nil {
+		return fmt.Errorf("Error deleting fifo %w", err)
 	}
 
 	return nil
