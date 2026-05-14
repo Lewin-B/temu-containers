@@ -94,6 +94,40 @@ func main() {
 					return container.Wait()
 				},
 			},
+			{
+				Name:      "pause",
+				Usage:     "pause <container-id>",
+				ArgsUsage: "<container-id>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					containerID := cmd.Args().Get(0)
+					if containerID == "" {
+						return fmt.Errorf("missing container id\nusage: temu-runc run <container-id>")
+					}
+
+					if err := utils.PauseContainer(containerID); err != nil {
+						return fmt.Errorf("Error pausing container: %w", err)
+					}
+
+					return nil
+				},
+			},
+			{
+				Name:      "resume",
+				Usage:     "resume <container-id>",
+				ArgsUsage: "<container-id>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					containerID := cmd.Args().Get(0)
+					if containerID == "" {
+						return fmt.Errorf("missing container id\nusage: temu-runc run <container-id>")
+					}
+
+					if err := utils.ResumeContainer(containerID); err != nil {
+						return fmt.Errorf("Error pausing container: %w", err)
+					}
+
+					return nil
+				},
+			},
 		},
 	}
 

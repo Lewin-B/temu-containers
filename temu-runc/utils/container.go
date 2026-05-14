@@ -93,12 +93,7 @@ func NewContainer(containerID string) (*Container, error) {
 
 	// Cgroup creation
 	cgroupId := containerID + "-cgroup"
-	cgroupName := fmt.Sprintf("container-%s.scope", containerID)
-	cgroupParentPath := fmt.Sprintf(
-		"/sys/fs/cgroup/user.slice/user-%d.slice/user@%d.service/app.slice",
-		uid,
-		uid,
-	)
+	cgroupName, cgroupParentPath := createCgroupPath(containerID)
 
 	cGroupConfig := CgroupConfig{
 		ID: cgroupId,
@@ -231,5 +226,21 @@ func Start(containerID string) error {
 		return fmt.Errorf("Error deleting fifo %w", err)
 	}
 
+	return nil
+}
+
+func PauseContainer(containerId string) error {
+	_, cgroupName := createCgroupPath(containerId)
+	if err := FreezeUserUnit(cgroupName); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ResumeContainer(containerId string) error {
+	_, cgroupName := createCgroupPath(containerId)
+	if err := ThawUserUnit(cgroupName); err != nil {
+		return err
+	}
 	return nil
 }

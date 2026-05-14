@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/godbus/dbus/v5"
@@ -49,6 +48,18 @@ type systemdProperty struct {
 type systemdAuxUnit struct {
 	Name       string
 	Properties []systemdProperty
+}
+
+func createCgroupPath(containerId string) (string, string) {
+	uid := os.Getuid()
+	cgroupName := fmt.Sprintf("container-%s.scope", containerId)
+	cgroupParentPath := fmt.Sprintf(
+		"/sys/fs/cgroup/user.slice/user-%d.slice/user@%d.service/app.slice",
+		uid,
+		uid,
+	)
+
+	return cgroupParentPath, cgroupName
 }
 
 func configureV2(cgroupPath string, config CgroupConfig) error {
@@ -164,7 +175,34 @@ func CreateDelegatedUserScope(scopeName string, pid int) error {
 	return nil
 }
 
-func AddProcess(cgroupPath string, pid int) error {
-	procsPath := filepath.Join(cgroupPath, "cgroup.procs")
-	return os.WriteFile(procsPath, []byte(strconv.Itoa(pid)), 0644)
+func FreezeUserUnit(unit string) error {
+	return callUserSystemdManager("FreezeUnit", unit)
+}
+
+func ThawUserUnit(unit string) error {
+	return callUserSystemdManager("ThawUnit", unit)
+}
+
+func callUserSystemdManager(method string, args ...interface{}) error {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return fmt.Errorf("connect to user dbus: %w", err)
+	}
+	defer conn.Close()
+
+	obj := conn.Object(
+		"org.freedesktop.systemd1",
+		"/org/freedesktop/systemd1",
+	)
+
+	call := obj.Call(
+		"org.freedesktop.systemd1.Manager."+method,
+		0,
+		args...,
+	)
+	if call.Err != nil {
+		return fmt.Errorf("call %s: %w", method, call.Err)
+	}
+
+	return nil
 }
