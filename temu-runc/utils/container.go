@@ -122,8 +122,14 @@ func NewContainer(containerID string) (*Container, error) {
 		},
 	}
 
-	if err := createV2(cGroupConfig); err != nil {
+	if err := CreateDelegatedUserScope(cgroupName, cmd.Process.Pid); err != nil {
 		return nil, fmt.Errorf("create cgroup: %w", err)
+	}
+
+	cgroupPath := filepath.Join(cgroupParentPath, cgroupName)
+
+	if err := configureV2(cgroupPath, cGroupConfig); err != nil {
+		return nil, err
 	}
 
 	return &Container{

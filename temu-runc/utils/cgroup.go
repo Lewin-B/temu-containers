@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"github.com/godbus/dbus/v5"
 )
 
 type CgroupConfig struct {
@@ -38,19 +41,17 @@ type IOConfig struct {
 	Max string // io.max
 }
 
-func createV2(config CgroupConfig) error {
-	// create cgroup directory
-	cgroupPath := filepath.Join(config.ParentPath, config.Name)
-	if err := os.Mkdir(cgroupPath, 0755); err != nil {
-		return fmt.Errorf("error creating cgroup directory: %w", err)
-	}
+type systemdProperty struct {
+	Name  string
+	Value dbus.Variant
+}
 
-	// enable controllers for cgroup
-	if err := enableControllers(config.ParentPath, []string{"cpu", "memory", "pids"}); err != nil {
-		return err
-	}
+type systemdAuxUnit struct {
+	Name       string
+	Properties []systemdProperty
+}
 
-	// configure cpu limits
+func configureV2(cgroupPath string, config CgroupConfig) error {
 	if config.CPU.Max != "" {
 		if err := writeCgroupFile(cgroupPath, "cpu.max", config.CPU.Max); err != nil {
 			return err
@@ -63,7 +64,6 @@ func createV2(config CgroupConfig) error {
 		}
 	}
 
-	// Configure memory limits.
 	if config.Memory.Max != "" {
 		if err := writeCgroupFile(cgroupPath, "memory.max", config.Memory.Max); err != nil {
 			return err
@@ -82,14 +82,12 @@ func createV2(config CgroupConfig) error {
 		}
 	}
 
-	// Configure PID limit.
 	if config.Pids.Max != "" {
 		if err := writeCgroupFile(cgroupPath, "pids.max", config.Pids.Max); err != nil {
 			return err
 		}
 	}
 
-	// Optional I/O limits.
 	if config.IO != nil && config.IO.Max != "" {
 		if err := writeCgroupFile(cgroupPath, "io.max", config.IO.Max); err != nil {
 			return err
@@ -128,4 +126,45 @@ func writeCgroupFile(cgroupPath string, fileName string, value string) error {
 	}
 
 	return nil
+}
+
+func CreateDelegatedUserScope(scopeName string, pid int) error {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return fmt.Errorf("connect to user dbus: %w", err)
+	}
+	defer conn.Close()
+
+	props := []systemdProperty{
+		{"Description", dbus.MakeVariant("temu container " + scopeName)},
+		{"Delegate", dbus.MakeVariant(true)},
+		{"PIDs", dbus.MakeVariant([]uint32{uint32(pid)})},
+		{"Slice", dbus.MakeVariant("app.slice")},
+	}
+
+	aux := []systemdAuxUnit{}
+
+	obj := conn.Object(
+		"org.freedesktop.systemd1",
+		"/org/freedesktop/systemd1",
+	)
+
+	call := obj.Call(
+		"org.freedesktop.systemd1.Manager.StartTransientUnit",
+		0,
+		scopeName,
+		"replace",
+		props,
+		aux,
+	)
+	if call.Err != nil {
+		return fmt.Errorf("start transient scope %s: %w", scopeName, call.Err)
+	}
+
+	return nil
+}
+
+func AddProcess(cgroupPath string, pid int) error {
+	procsPath := filepath.Join(cgroupPath, "cgroup.procs")
+	return os.WriteFile(procsPath, []byte(strconv.Itoa(pid)), 0644)
 }
