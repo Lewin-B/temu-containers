@@ -52,6 +52,19 @@ type systemdAuxUnit struct {
 	Properties []systemdProperty
 }
 
+type systemdUnit struct {
+	Name        string
+	Description string
+	LoadState   string
+	ActiveState string
+	SubState    string
+	Following   string
+	Path        dbus.ObjectPath
+	JobID       uint32
+	JobType     string
+	JobPath     dbus.ObjectPath
+}
+
 func createCgroupPath(containerId string) (string, string) {
 	uid := os.Getuid()
 	cgroupName := fmt.Sprintf("container-%s.scope", containerId)
@@ -241,6 +254,55 @@ func KillUserUnit(unit string) error {
 
 func StopUserUnit(unit string) error {
 	return callUserSystemdManager("StopUnit", unit, "replace")
+}
+
+func ListUserContainerUnitStatuses() (map[string]string, error) {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return nil, fmt.Errorf("connect to user dbus: %w", err)
+	}
+	defer conn.Close()
+
+	obj := conn.Object(
+		"org.freedesktop.systemd1",
+		"/org/freedesktop/systemd1",
+	)
+
+	var units []systemdUnit
+	call := obj.Call(
+		"org.freedesktop.systemd1.Manager.ListUnitsByPatterns",
+		0,
+		[]string{},
+		[]string{"container-*.scope"},
+	)
+	if call.Err != nil {
+		return nil, fmt.Errorf("list systemd container units: %w", call.Err)
+	}
+	if err := call.Store(&units); err != nil {
+		return nil, fmt.Errorf("read systemd container units: %w", err)
+	}
+
+	statuses := make(map[string]string, len(units))
+	for _, unit := range units {
+		containerID, ok := containerIDFromScopeName(unit.Name)
+		if !ok {
+			continue
+		}
+		statuses[containerID] = unit.ActiveState + "/" + unit.SubState
+	}
+
+	return statuses, nil
+}
+
+func containerIDFromScopeName(unitName string) (string, bool) {
+	const prefix = "container-"
+	const suffix = ".scope"
+
+	if !strings.HasPrefix(unitName, prefix) || !strings.HasSuffix(unitName, suffix) {
+		return "", false
+	}
+
+	return strings.TrimSuffix(strings.TrimPrefix(unitName, prefix), suffix), true
 }
 
 func callUserSystemdManager(method string, args ...interface{}) error {

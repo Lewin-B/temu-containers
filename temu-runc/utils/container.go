@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"syscall"
 	"time"
 )
@@ -31,6 +32,14 @@ func runtimeDirForHost(containerID string) string {
 	}
 
 	return fmt.Sprintf("/run/user/%d/temu-runc/%s", os.Getuid(), containerID)
+}
+
+func runtimeRootForHost() string {
+	if runtimeDir := os.Getenv("TEMU_RUNTIME_DIR"); runtimeDir != "" {
+		return filepath.Dir(runtimeDir)
+	}
+
+	return fmt.Sprintf("/run/user/%d/temu-runc", os.Getuid())
 }
 
 func (c Container) startContainer() int {
@@ -256,6 +265,51 @@ func DeleteContainer(containerId string) error {
 	containerDir := runtimeDirForHost(containerId)
 	if err := os.RemoveAll(containerDir); err != nil {
 		return fmt.Errorf("remove container runtime dir: %w", err)
+	}
+
+	return nil
+}
+
+func ListContainers() error {
+	root := runtimeRootForHost()
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	statuses, err := ListUserContainerUnitStatuses()
+	if err != nil {
+		return err
+	}
+
+	var containerIDs []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "state.json")); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("stat container state: %w", err)
+		}
+
+		containerIDs = append(containerIDs, entry.Name())
+	}
+	sort.Strings(containerIDs)
+
+	fmt.Printf("%-20s %s\n", "CONTAINER ID", "STATUS")
+	for _, containerID := range containerIDs {
+		status := statuses[containerID]
+		if status == "" {
+			status = "stopped"
+		}
+
+		fmt.Printf("%-20s %s\n", containerID, status)
 	}
 
 	return nil

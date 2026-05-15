@@ -161,6 +161,17 @@ func main() {
 					return nil
 				},
 			},
+			{
+				Name:  "ls",
+				Usage: "ls",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					if err := utils.ListContainers(); err != nil {
+						return fmt.Errorf("Error listing container: %w", err)
+					}
+
+					return nil
+				},
+			},
 		},
 	}
 
