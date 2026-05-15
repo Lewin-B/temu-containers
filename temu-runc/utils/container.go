@@ -93,7 +93,7 @@ func NewContainer(containerID string) (*Container, error) {
 
 	// Cgroup creation
 	cgroupId := containerID + "-cgroup"
-	cgroupName, cgroupParentPath := createCgroupPath(containerID)
+	cgroupParentPath, cgroupName := createCgroupPath(containerID)
 
 	cGroupConfig := CgroupConfig{
 		ID: cgroupId,
@@ -107,8 +107,8 @@ func NewContainer(containerID string) (*Container, error) {
 		},
 
 		Memory: MemoryConfig{
-			Max:  "256M",
-			High: "200M",
+			Max:  "268435456",
+			High: "209715200",
 			Swap: "0",
 		},
 
@@ -242,5 +242,21 @@ func ResumeContainer(containerId string) error {
 	if err := ThawUserUnit(cgroupName); err != nil {
 		return err
 	}
+	return nil
+}
+
+func KillContainer(containerId string) error {
+	fmt.Println("Kill: ", containerId)
+	_, cgroupName := createCgroupPath(containerId)
+	return KillUserUnit(cgroupName)
+}
+
+func DeleteContainer(containerId string) error {
+
+	containerDir := runtimeDirForHost(containerId)
+	if err := os.RemoveAll(containerDir); err != nil {
+		return fmt.Errorf("remove container runtime dir: %w", err)
+	}
+
 	return nil
 }

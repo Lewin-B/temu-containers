@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -160,6 +162,24 @@ func CreateDelegatedUserScope(scopeName string, pid int) error {
 		"/org/freedesktop/systemd1",
 	)
 
+	signals := make(chan *dbus.Signal, 8)
+	conn.Signal(signals)
+	defer conn.RemoveSignal(signals)
+
+	if err := conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.systemd1.Manager"),
+		dbus.WithMatchMember("JobRemoved"),
+		dbus.WithMatchObjectPath("/org/freedesktop/systemd1"),
+	); err != nil {
+		return fmt.Errorf("subscribe to systemd job signals: %w", err)
+	}
+	defer conn.RemoveMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.systemd1.Manager"),
+		dbus.WithMatchMember("JobRemoved"),
+		dbus.WithMatchObjectPath("/org/freedesktop/systemd1"),
+	)
+
+	var job dbus.ObjectPath
 	call := obj.Call(
 		"org.freedesktop.systemd1.Manager.StartTransientUnit",
 		0,
@@ -171,8 +191,40 @@ func CreateDelegatedUserScope(scopeName string, pid int) error {
 	if call.Err != nil {
 		return fmt.Errorf("start transient scope %s: %w", scopeName, call.Err)
 	}
+	if err := call.Store(&job); err != nil {
+		return fmt.Errorf("read transient scope job path: %w", err)
+	}
 
-	return nil
+	return waitForSystemdJob(signals, job, scopeName, 5*time.Second)
+}
+
+func waitForSystemdJob(signals <-chan *dbus.Signal, job dbus.ObjectPath, unit string, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case signal := <-signals:
+			if signal == nil || signal.Name != "org.freedesktop.systemd1.Manager.JobRemoved" || len(signal.Body) < 4 {
+				continue
+			}
+
+			removedJob, ok := signal.Body[1].(dbus.ObjectPath)
+			if !ok || removedJob != job {
+				continue
+			}
+
+			removedUnit, _ := signal.Body[2].(string)
+			result, _ := signal.Body[3].(string)
+			if result != "done" {
+				return fmt.Errorf("systemd job for %s finished with result %q", removedUnit, result)
+			}
+
+			return nil
+		case <-timer.C:
+			return fmt.Errorf("timed out waiting for systemd job %s for %s", job, unit)
+		}
+	}
 }
 
 func FreezeUserUnit(unit string) error {
@@ -181,6 +233,14 @@ func FreezeUserUnit(unit string) error {
 
 func ThawUserUnit(unit string) error {
 	return callUserSystemdManager("ThawUnit", unit)
+}
+
+func KillUserUnit(unit string) error {
+	return callUserSystemdManager("KillUnit", unit, "all", int32(syscall.SIGKILL))
+}
+
+func StopUserUnit(unit string) error {
+	return callUserSystemdManager("StopUnit", unit, "replace")
 }
 
 func callUserSystemdManager(method string, args ...interface{}) error {

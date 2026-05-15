@@ -127,6 +127,40 @@ func main() {
 					return nil
 				},
 			},
+			{
+				Name:      "kill",
+				Usage:     "kill <container-id>",
+				ArgsUsage: "<container-id>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					containerID := cmd.Args().Get(0)
+					if containerID == "" {
+						return fmt.Errorf("missing container id\nusage: temu-runc run <container-id>")
+					}
+
+					if err := utils.KillContainer(containerID); err != nil {
+						return fmt.Errorf("Error killing container: %w", err)
+					}
+
+					return nil
+				},
+			},
+			{
+				Name:      "delete",
+				Usage:     "delete <container-id>",
+				ArgsUsage: "<container-id>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					containerID := cmd.Args().Get(0)
+					if containerID == "" {
+						return fmt.Errorf("missing container id\nusage: temu-runc run <container-id>")
+					}
+
+					if err := utils.DeleteContainer(containerID); err != nil {
+						return fmt.Errorf("Error killing container: %w", err)
+					}
+
+					return nil
+				},
+			},
 		},
 	}
 
